@@ -1,6 +1,7 @@
 name: Deploy Resource Group
 
 on:
+  # Allow running from ANY branch using the button
   workflow_dispatch:
     inputs:
       targetEnvironment:
@@ -12,10 +13,22 @@ on:
           - connectivity-nonprod
           - amba-nonprod
           - identity-nonprod
+
       pipeline_branch:
         description: "Core-library branch"
         type: string
         default: branch_sree
+
+  # Allow automatic CI runs from BOTH main and branch_sree
+  push:
+    branches:
+      - main
+      - branch_sree
+
+  # Allow pipeline execution on Pull Request toward main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   id-token: write
@@ -52,7 +65,7 @@ jobs:
         run: |
           file="alz-azure-iac-core-pipeline/resource-group/platform-nonprod/variables/${{ inputs.targetEnvironment }}.yaml"
           echo "Using vars file: $file"
-          # simple extraction of scalar values
+
           ENVIRONMENT=$(grep '^  - name: ENVIRONMENT' -A1 "$file" | tail -n1 | awk '{print $2}')
           AZURE_SUBSCRIPTION=$(grep '^  - name: AZURE_SUBSCRIPTION' -A1 "$file" | tail -n1 | awk '{print $2}')
           LOCATION=$(grep '^  - name: location' -A1 "$file" | tail -n1 | awk '{print $2}')
@@ -60,12 +73,12 @@ jobs:
           ENABLE_TELEMETRY=$(grep '^  - name: enableTelemetry' -A1 "$file" | tail -n1 | awk '{print $2}')
           SUBSCRIPTION_ID=$(grep '^  - name: subscriptionId' -A1 "$file" | tail -n1 | awk '{print $2}')
 
-          echo "ENVIRONMENT=$ENVIRONMENT"           >> $GITHUB_OUTPUT
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_OUTPUT
           echo "AZURE_SUBSCRIPTION=$AZURE_SUBSCRIPTION" >> $GITHUB_OUTPUT
-          echo "LOCATION=$LOCATION"                 >> $GITHUB_OUTPUT
-          echo "RESOURCE_GROUP_NAME=$RG_NAME"       >> $GITHUB_OUTPUT
+          echo "LOCATION=$LOCATION" >> $GITHUB_OUTPUT
+          echo "RESOURCE_GROUP_NAME=$RG_NAME" >> $GITHUB_OUTPUT
           echo "ENABLE_TELEMETRY=$ENABLE_TELEMETRY" >> $GITHUB_OUTPUT
-          echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID"   >> $GITHUB_OUTPUT
+          echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID" >> $GITHUB_OUTPUT
 
       - name: Log Parameters
         run: |
