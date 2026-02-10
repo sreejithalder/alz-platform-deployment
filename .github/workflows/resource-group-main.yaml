@@ -52,6 +52,10 @@ jobs:
 
       - name: Setup Azure CLI
         uses: azure/cli@v2
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            az --version
 
       - name: Azure Login
         uses: azure/login@v2
