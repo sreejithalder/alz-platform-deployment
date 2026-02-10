@@ -1,0 +1,26 @@
+variables:
+  # Common values
+  - name: Environment
+    value: NONPROD
+  - name: AZURE_SUBSCRIPTION
+    value: azure-platform-nonprod
+  - name: location
+    value: southeastasia
+  - name: tags_OFFICE
+    value: HKG
+  - name: tags_PROJECTS
+    value: AE_SHARED_SERVICES
+  - name: tags_TECH STACK CATEGORY
+    value: CLOUD PLATFORM
+  - name: tags_Description
+    value: RG for Shared resources in Platform NonProd
+  - name: enableTelemetry
+    value: true
+  - name: subscriptionId
+    value: 81c05b3c-9602-4cf6-aa56-51c23b153db1
+
+  # Resource Group specific
+  - name: resourceGroupName
+    value: rg-shared-nonprod-seasia
+  - name: roleAssignments
+    value: "[]"
