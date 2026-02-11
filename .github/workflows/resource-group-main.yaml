@@ -85,8 +85,19 @@ jobs:
           echo "Resource Group Name: ${{ steps.vars.outputs.RESOURCE_GROUP_NAME }}"
           echo "Location: ${{ steps.vars.outputs.LOCATION }}"
 
+      - name: Debug - List action directory
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Listing .github/actions:"
+          ls -la .github/actions/ || echo "actions directory not found"
+          echo "Listing resource-group-template:"
+          ls -la .github/actions/resource-group-template/ || echo "resource-group-template directory not found"
+          echo "Checking for action file:"
+          cat .github/actions/resource-group-template/action.yaml || echo "action.yaml not found"
+
       - name: Call wrapper (resource-group)
-        uses: ./.github/actions
+        uses: ./.github/actions/resource-group-template
         with:
           resourceGroupName: ${{ steps.vars.outputs.RESOURCE_GROUP_NAME }}
           location: ${{ steps.vars.outputs.LOCATION }}
