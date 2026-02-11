@@ -1,0 +1,84 @@
+name: "Resource Group Wrapper"
+description: "Validate and deploy Resource Group via AVM Bicep"
+inputs:
+  resourceGroupName:
+    required: true
+  location:
+    required: true
+  tags:
+    required: false
+    default: "{}"
+  roleAssignments:
+    required: false
+    default: "[]"
+  lock:
+    required: false
+    default: "{}"
+  enableTelemetry:
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate location
+      shell: bash
+      run: |
+        az account list-locations --query "[?name=='${{ inputs.location }}']" --output tsv \
+          || { echo "Invalid location: ${{ inputs.location }}"; exit 1; }
+
+    - name: Build params.json
+      shell: bash
+      run: |
+        ENABLETELEMETRY="${{ inputs.enableTelemetry }}"
+        if [ "$ENABLETELEMETRY" = "true" ] || [ "$ENABLETELEMETRY" = "True" ]; then
+          ENABLETELEMETRY=true
+        else
+          ENABLETELEMETRY=false
+        fi
+
+        cat > params.json << EOFPARAM
+        {
+          "name": { "value": "${{ inputs.resourceGroupName }}" },
+          "location": { "value": "${{ inputs.location }}" },
+          "tags": { "value": ${{ inputs.tags }} },
+          "roleAssignments": { "value": ${{ inputs.roleAssignments }} },
+          "lock": { "value": ${{ inputs.lock }} },
+          "enableTelemetry": { "value": $ENABLETELEMETRY }
+        }
+        EOFPARAM
+
+        tr -d '\r' < params.json > params_clean.json
+        mv params_clean.json params.json
+
+        python3 -c "import json; json.load(open('params.json'))" \
+          || { echo 'Invalid JSON in params.json'; cat params.json; exit 1; }
+
+        echo "Generated params.json:"
+        cat params.json
+
+    - name: Validate Bicep deployment
+      shell: bash
+      run: |
+        BICEP_FILE="bicep/res/resources/resource-group/main.bicep"
+        echo "Bicep file contents:"
+        cat "$BICEP_FILE" || echo "Bicep file not found"
+
+        az deployment sub validate \
+          --location "${{ inputs.location }}" \
+          --template-file "$BICEP_FILE" \
+          --parameters @params.json
+
+    - name: Deploy Resource Group
+      shell: bash
+      run: |
+        BICEP_FILE="bicep/res/resources/resource-group/main.bicep"
+        az deployment sub create \
+          --location "${{ inputs.location }}" \
+          --template-file "$BICEP_FILE" \
+          --parameters @params.json
+
+    - name: Deployment Confirmation
+      shell: bash
+      run: |
+        echo "Successfully deployed Resource Group: ${{ inputs.resourceGroupName }}"
