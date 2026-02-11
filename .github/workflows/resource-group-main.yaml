@@ -1,7 +1,7 @@
 name: Deploy Resource Group
 
 on:
-  # Manual execution only
+  # Allow running from ANY branch using the button
   workflow_dispatch:
     inputs:
       targetEnvironment:
@@ -19,7 +19,13 @@ on:
         type: string
         default: branch_sree
 
-  # Only keep PR trigger if needed for validation
+  # Allow automatic CI runs from BOTH main and branch_sree
+  push:
+    branches:
+      - main
+      - branch_sree
+
+  # Allow pipeline execution on Pull Request toward main
   pull_request:
     branches:
       - main
@@ -32,6 +38,10 @@ env:
   CORELIB_REPO: alz-platform-deployment
   CORELIB_PATH: alz-azure-iac-template-library
   BICEP_PATH: bicep
+  TECH_STACK_CATEGORY: "IaC"  # Define missing env vars
+  PROJECTS: "Platform"
+  OFFICE: "Engineering"
+  DESCRIPTION: "Resource Group Deployment"
 
 jobs:
   deploy-resource-group:
@@ -42,12 +52,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.pipeline_branch || github.ref }}
+          ref: ${{ github.event.inputs.pipeline_branch || github.ref }}
 
       - name: Setup Azure CLI
         uses: azure/cli@v2
         with:
-          azcliversion: latest  # Changed from 'agentazcliversion'
+          azcliversion: latest
           inlineScript: |
             az --version
 
@@ -58,11 +68,28 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.PLATFORM_NONPROD_SUBSCRIPTION_ID }}
 
+      - name: Debug - List action directory
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Listing .github/actions:"
+          ls -la .github/actions/ || echo "actions directory not found"
+          echo "Listing resource-group-template:"
+          ls -la .github/actions/resource-group-template/ || echo "resource-group-template directory not found"
+          echo "Checking for action file:"
+          cat .github/actions/resource-group-template/action.yaml || echo "action.yaml not found"
+
       - name: Load environment variables
         id: vars
         run: |
-          file="alz-azure-iac-core-pipeline/resource-group/platform-nonprod/variables/${{ inputs.targetEnvironment || 'shared-nonprod' }}.yaml"
+          TARGET_ENV="${{ github.event.inputs.targetEnvironment || 'shared-nonprod' }}"
+          file="alz-azure-iac-core-pipeline/resource-group/platform-nonprod/variables/${TARGET_ENV}.yaml"
           echo "Using vars file: $file"
+
+          if [ ! -f "$file" ]; then
+            echo "ERROR: Variables file not found: $file"
+            exit 1
+          fi
 
           ENVIRONMENT=$(grep '^  - name: ENVIRONMENT' -A1 "$file" | tail -n1 | awk '{print $2}')
           AZURE_SUBSCRIPTION=$(grep '^  - name: AZURE_SUBSCRIPTION' -A1 "$file" | tail -n1 | awk '{print $2}')
@@ -84,17 +111,6 @@ jobs:
           echo "Azure Subscription: ${{ steps.vars.outputs.AZURE_SUBSCRIPTION }}"
           echo "Resource Group Name: ${{ steps.vars.outputs.RESOURCE_GROUP_NAME }}"
           echo "Location: ${{ steps.vars.outputs.LOCATION }}"
-
-      - name: Debug - List action directory
-        run: |
-          echo "Current directory:"
-          pwd
-          echo "Listing .github/actions:"
-          ls -la .github/actions/ || echo "actions directory not found"
-          echo "Listing resource-group-template:"
-          ls -la .github/actions/resource-group-template/ || echo "resource-group-template directory not found"
-          echo "Checking for action file:"
-          cat .github/actions/resource-group-template/action.yaml || echo "action.yaml not found"
 
       - name: Call wrapper (resource-group)
         uses: ./.github/actions/resource-group-template
