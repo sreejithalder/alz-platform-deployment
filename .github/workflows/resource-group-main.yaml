@@ -97,7 +97,7 @@ jobs:
           cat .github/actions/resource-group-template/action.yaml || echo "action.yaml not found"
 
       - name: Call wrapper (resource-group)
-        uses: /.github/actions/resource-group-template
+        uses: ./.github/actions/resource-group-template
         with:
           resourceGroupName: ${{ steps.vars.outputs.RESOURCE_GROUP_NAME }}
           location: ${{ steps.vars.outputs.LOCATION }}

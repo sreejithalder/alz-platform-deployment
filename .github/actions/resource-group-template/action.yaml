@@ -37,7 +37,7 @@ runs:
           ENABLETELEMETRY=false
         fi
 
-        cat > params.json << EOF
+        cat > params.json << EOFPARAM
         {
           "name": { "value": "${{ inputs.resourceGroupName }}" },
           "location": { "value": "${{ inputs.location }}" },
@@ -46,7 +46,7 @@ runs:
           "lock": { "value": ${{ inputs.lock }} },
           "enableTelemetry": { "value": $ENABLETELEMETRY }
         }
-        EOF
+        EOFPARAM
 
         tr -d '\r' < params.json > params_clean.json
         mv params_clean.json params.json
@@ -81,4 +81,4 @@ runs:
     - name: Deployment Confirmation
       shell: bash
       run: |
-        echo "✓ Successfully deployed Resource Group: ${{ inputs.resourceGroupName }}"
+        echo "Successfully deployed Resource Group: ${{ inputs.resourceGroupName }}"
