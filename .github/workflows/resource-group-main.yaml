@@ -29,10 +29,10 @@ on:
   pull_request:
     branches:
       - main
+      - branch_sree
 
 permissions:
   id-token: write
-  contents: read
 
 env:
   CORELIB_REPO: alz-platform-deployment
@@ -48,7 +48,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
-      contents: read
 
     steps:
       - name: Checkout repo
@@ -57,28 +56,19 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.pipeline_branch || github.ref }}
 
-      - name: Setup Azure CLI
-        uses: azure/cli@v2
-        with:
-          azcliversion: latest
-          inlineScript: |
-            az --version
-
       - name: Azure Login
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.PLATFORM_NONPROD_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.PLATFORM_NONPROD_SUBSCRIPTION_ID }}
-          auth-type: SERVICE_PRINCIPAL
-          enable-AzPSSession: false
 
-
-      - name: Diagnose Azure context (post-login)
-        run: |
-          az version
-          az account show
-          az account list --output table
+      - name: Azure CLI script
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az account show
 
       - name: Debug - List action directory
         run: |
