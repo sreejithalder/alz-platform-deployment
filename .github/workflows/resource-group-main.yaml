@@ -1,7 +1,5 @@
 name: Deploy Resource Group
-
 on:
-  # Allow running from ANY branch using the button
   workflow_dispatch:
     inputs:
       targetEnvironment:
