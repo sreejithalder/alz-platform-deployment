@@ -73,6 +73,12 @@ jobs:
           echo "Checking for action file:"
           cat .github/actions/resource-group-template/action.yaml || echo "action.yaml not found"
 
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.pipeline_branch || github.ref_name }}
+
       - name: Load environment variables
         id: vars
         run: |
