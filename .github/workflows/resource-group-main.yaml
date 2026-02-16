@@ -50,6 +50,12 @@ jobs:
       id-token: write
 
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.pipeline_branch || github.ref_name }}
+
       - name: Azure Login
         uses: azure/login@v2
         with:
