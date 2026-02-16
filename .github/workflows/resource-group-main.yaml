@@ -46,6 +46,9 @@ env:
 jobs:
   deploy-resource-group:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout repo
@@ -67,6 +70,15 @@ jobs:
           client-id: ${{ secrets.PLATFORM_NONPROD_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.PLATFORM_NONPROD_SUBSCRIPTION_ID }}
+          auth-type: SERVICE_PRINCIPAL
+          enable-AzPSSession: false
+
+
+      - name: Diagnose Azure context (post-login)
+        run: |
+          az version
+          az account show
+          az account list --output table
 
       - name: Debug - List action directory
         run: |
