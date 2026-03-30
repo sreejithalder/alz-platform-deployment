@@ -80,8 +80,8 @@ jobs:
       - name: Load environment variables
         id: vars
         run: |
-          TARGET_ENV="${{ github.event.inputs.targetEnvironment || 'shared-nonprod-002' }}"
-          file="alz-azure-iac-core-pipeline/virtual-network/platform-nonprod/variables/${TARGET_ENV}.yaml"
+          TARGET_ENV="${{ github.event.inputs.targetEnvironment || 'vnet-aesm-hub-nonprod-seasia' }}"
+          file="alz-azure-iac-core-pipeline/vnet/platform-nonprod/variables/${TARGET_ENV}.yaml"
           echo "Using vars file: $file"
 
           if [ ! -f "$file" ]; then
