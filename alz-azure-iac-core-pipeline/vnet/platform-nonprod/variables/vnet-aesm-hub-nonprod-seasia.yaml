@@ -83,6 +83,6 @@ variables:
   - name: enableVmProtection
     value: false
   - name: ddosProtectionPlanResourceId
-    value: '{}'
+    value: ''
   - name: virtualNetworkBgpCommunity
     value: ""
