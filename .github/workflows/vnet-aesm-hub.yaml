@@ -73,9 +73,9 @@ jobs:
           echo "Listing .github/actions:"
           ls -la .github/actions/ || echo "actions directory not found"
           echo "Listing virtual-network-template:"
-          ls -la .github/actions/virtual-network-template/ || echo "virtual-network-template directory not found"
+          ls -la .github/actions/vnet-template/ || echo "virtual-network-template directory not found"
           echo "Checking for action file:"
-          cat .github/actions/virtual-network-template/action.yaml || echo "action.yaml not found"
+          cat .github/actions/vnet-template/action.yaml || echo "action.yaml not found"
 
       - name: Load environment variables
         id: vars
