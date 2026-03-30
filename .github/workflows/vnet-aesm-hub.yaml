@@ -1,7 +1,6 @@
 name: Deploy Virtual Network
 
 on:
-  # Allow running from ANY branch using the button
   workflow_dispatch:
     inputs:
       targetEnvironment:
@@ -17,13 +16,11 @@ on:
         type: string
         default: branch_sree
 
-  # Allow automatic CI runs from BOTH main and branch_sree
   push:
     branches:
       - main
       - branch_sree
 
-  # Allow pipeline execution on Pull Request toward main
   pull_request:
     branches:
       - main
@@ -72,8 +69,8 @@ jobs:
           pwd
           echo "Listing .github/actions:"
           ls -la .github/actions/ || echo "actions directory not found"
-          echo "Listing virtual-network-template:"
-          ls -la .github/actions/vnet-template/ || echo "virtual-network-template directory not found"
+          echo "Listing vnet-template:"
+          ls -la .github/actions/vnet-template/ || echo "vnet-template directory not found"
           echo "Checking for action file:"
           cat .github/actions/vnet-template/action.yaml || echo "action.yaml not found"
 
@@ -89,7 +86,7 @@ jobs:
             exit 1
           fi
 
-          # ── Scalar fields ──────────────────────────────────────────────────
+          # ── Scalar fields via grep+awk (same pattern as RG pipeline) ────────
           ENVIRONMENT=$(grep '^  - name: ENVIRONMENT' -A1 "$file" | tail -n1 | awk '{print $2}')
           AZURE_SUBSCRIPTION=$(grep '^  - name: AZURE_SUBSCRIPTION' -A1 "$file" | tail -n1 | awk '{print $2}')
           LOCATION=$(grep '^  - name: location' -A1 "$file" | tail -n1 | awk '{print $2}')
@@ -104,94 +101,111 @@ jobs:
           DDOS_PLAN_ID=$(grep '^  - name: ddosProtectionPlanResourceId' -A1 "$file" | tail -n1 | awk '{print $2}')
           BGP_COMMUNITY=$(grep '^  - name: virtualNetworkBgpCommunity' -A1 "$file" | tail -n1 | awk '{print $2}')
 
-          # ── JSON / multi-line fields: use Python to safely extract ──────────
-          ADDRESS_PREFIXES=$(python3 - "$file" <<'PYEOF'
-          import sys, re, json
-          content = open(sys.argv[1]).read()
-          m = re.search(r"- name: addressPrefixes\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
-          print(m.group(1).strip() if m else '[]')
-          PYEOF
-          )
-
-          SUBNETS=$(python3 - "$file" <<'PYEOF'
+          # ── JSON fields: Python reads the single-quoted inline value ─────────
+          # All JSON fields in the variables YAML MUST use:
+          #   value: '<compact-json-on-one-line>'
+          # The extractor strips the surrounding single quotes.
+          extract_json() {
+            local field="$1"
+            local default="$2"
+            python3 - "$file" "$field" "$default" <<'PYEOF'
           import sys, re
-          content = open(sys.argv[1]).read()
-          m = re.search(r"- name: subnets\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL | re.MULTILINE)
-          print(m.group(1).strip() if m else '[]')
-          PYEOF
-          )
 
-          DNS_SERVERS=$(python3 - "$file" <<'PYEOF'
-          import sys, re
-          content = open(sys.argv[1]).read()
-          m = re.search(r"- name: dnsServers\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
-          print(m.group(1).strip() if m else '[]')
-          PYEOF
-          )
+          filepath, field, default = sys.argv[1], sys.argv[2], sys.argv[3]
+          content = open(filepath).read()
 
-          PEERINGS=$(python3 - "$file" <<'PYEOF'
-          import sys, re
-          content = open(sys.argv[1]).read()
-          m = re.search(r"- name: peerings\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
-          print(m.group(1).strip() if m else '[]')
+          # Match:  - name: <field>\n    value: '<json>'
+          # The single quotes are the reliable delimiters — they wrap the whole JSON blob.
+          pattern = r"-\s+name:\s+" + re.escape(field) + r"\s*\n\s+value:\s+'([^']+)'"
+          m = re.search(pattern, content)
+          if m:
+              print(m.group(1).strip())
+          else:
+              print(default)
           PYEOF
-          )
+          }
 
-          DIAGNOSTIC_SETTINGS=$(python3 - "$file" <<'PYEOF'
-          import sys, re
-          content = open(sys.argv[1]).read()
-          m = re.search(r"- name: diagnosticSettings\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
-          print(m.group(1).strip() if m else '[]')
-          PYEOF
-          )
+          ADDRESS_PREFIXES=$(extract_json "addressPrefixes"    '[]')
+          SUBNETS=$(extract_json           "subnets"           '[]')
+          DNS_SERVERS=$(extract_json       "dnsServers"        '[]')
+          PEERINGS=$(extract_json          "peerings"          '[]')
+          DIAGNOSTIC_SETTINGS=$(extract_json "diagnosticSettings" '[]')
+          ROLE_ASSIGNMENTS=$(extract_json  "roleAssignments"   '[]')
+          LOCK=$(extract_json              "lock"              '{}')
 
-          ROLE_ASSIGNMENTS=$(python3 - "$file" <<'PYEOF'
-          import sys, re
-          content = open(sys.argv[1]).read()
-          m = re.search(r"- name: roleAssignments\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
-          print(m.group(1).strip() if m else '[]')
-          PYEOF
-          )
+          # ── Validate every JSON field before exporting ───────────────────────
+          for label_value in \
+            "addressPrefixes:$ADDRESS_PREFIXES" \
+            "subnets:$SUBNETS" \
+            "dnsServers:$DNS_SERVERS" \
+            "peerings:$PEERINGS" \
+            "diagnosticSettings:$DIAGNOSTIC_SETTINGS" \
+            "roleAssignments:$ROLE_ASSIGNMENTS" \
+            "lock:$LOCK"; do
+            label="${label_value%%:*}"
+            val="${label_value#*:}"
+            python3 -c "import json,sys; json.loads(sys.argv[1])" "$val" \
+              || { echo "ERROR: Invalid JSON for field '$label': $val"; exit 1; }
+          done
+          echo "All JSON fields validated OK"
 
-          # ── Export all outputs ─────────────────────────────────────────────
-          echo "ENVIRONMENT=$ENVIRONMENT"                                >> $GITHUB_OUTPUT
-          echo "AZURE_SUBSCRIPTION=$AZURE_SUBSCRIPTION"                 >> $GITHUB_OUTPUT
-          echo "LOCATION=$LOCATION"                                      >> $GITHUB_OUTPUT
-          echo "RESOURCE_GROUP_NAME=$RG_NAME"                           >> $GITHUB_OUTPUT
-          echo "VNET_NAME=$VNET_NAME"                                    >> $GITHUB_OUTPUT
-          echo "ENABLE_TELEMETRY=$ENABLE_TELEMETRY"                     >> $GITHUB_OUTPUT
-          echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID"                       >> $GITHUB_OUTPUT
-          echo "VNET_ENCRYPTION=$VNET_ENCRYPTION"                       >> $GITHUB_OUTPUT
+          # ── Export scalar outputs ────────────────────────────────────────────
+          echo "ENVIRONMENT=$ENVIRONMENT"                                  >> $GITHUB_OUTPUT
+          echo "AZURE_SUBSCRIPTION=$AZURE_SUBSCRIPTION"                   >> $GITHUB_OUTPUT
+          echo "LOCATION=$LOCATION"                                        >> $GITHUB_OUTPUT
+          echo "RESOURCE_GROUP_NAME=$RG_NAME"                             >> $GITHUB_OUTPUT
+          echo "VNET_NAME=$VNET_NAME"                                      >> $GITHUB_OUTPUT
+          echo "ENABLE_TELEMETRY=$ENABLE_TELEMETRY"                       >> $GITHUB_OUTPUT
+          echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID"                         >> $GITHUB_OUTPUT
+          echo "VNET_ENCRYPTION=$VNET_ENCRYPTION"                         >> $GITHUB_OUTPUT
           echo "VNET_ENCRYPTION_ENFORCEMENT=$VNET_ENCRYPTION_ENFORCEMENT" >> $GITHUB_OUTPUT
-          echo "FLOW_TIMEOUT=$FLOW_TIMEOUT"                             >> $GITHUB_OUTPUT
-          echo "ENABLE_VM_PROTECTION=$ENABLE_VM_PROTECTION"             >> $GITHUB_OUTPUT
-          echo "DDOS_PLAN_ID=$DDOS_PLAN_ID"                             >> $GITHUB_OUTPUT
-          echo "BGP_COMMUNITY=$BGP_COMMUNITY"                           >> $GITHUB_OUTPUT
+          echo "FLOW_TIMEOUT=$FLOW_TIMEOUT"                               >> $GITHUB_OUTPUT
+          echo "ENABLE_VM_PROTECTION=$ENABLE_VM_PROTECTION"               >> $GITHUB_OUTPUT
+          echo "DDOS_PLAN_ID=$DDOS_PLAN_ID"                               >> $GITHUB_OUTPUT
+          echo "BGP_COMMUNITY=$BGP_COMMUNITY"                             >> $GITHUB_OUTPUT
 
-          # Multi-line JSON outputs require EOF delimiter syntax
-          echo "ADDRESS_PREFIXES<<EOF"    >> $GITHUB_OUTPUT
-          echo "$ADDRESS_PREFIXES"        >> $GITHUB_OUTPUT
-          echo "EOF"                      >> $GITHUB_OUTPUT
+          # ── Export JSON outputs using EOF delimiter (preserves content) ──────
+          {
+            echo "ADDRESS_PREFIXES<<__EOF__"
+            echo "$ADDRESS_PREFIXES"
+            echo "__EOF__"
+          } >> $GITHUB_OUTPUT
 
-          echo "SUBNETS<<EOF"             >> $GITHUB_OUTPUT
-          echo "$SUBNETS"                 >> $GITHUB_OUTPUT
-          echo "EOF"                      >> $GITHUB_OUTPUT
+          {
+            echo "SUBNETS<<__EOF__"
+            echo "$SUBNETS"
+            echo "__EOF__"
+          } >> $GITHUB_OUTPUT
 
-          echo "DNS_SERVERS<<EOF"         >> $GITHUB_OUTPUT
-          echo "$DNS_SERVERS"             >> $GITHUB_OUTPUT
-          echo "EOF"                      >> $GITHUB_OUTPUT
+          {
+            echo "DNS_SERVERS<<__EOF__"
+            echo "$DNS_SERVERS"
+            echo "__EOF__"
+          } >> $GITHUB_OUTPUT
 
-          echo "PEERINGS<<EOF"            >> $GITHUB_OUTPUT
-          echo "$PEERINGS"                >> $GITHUB_OUTPUT
-          echo "EOF"                      >> $GITHUB_OUTPUT
+          {
+            echo "PEERINGS<<__EOF__"
+            echo "$PEERINGS"
+            echo "__EOF__"
+          } >> $GITHUB_OUTPUT
 
-          echo "DIAGNOSTIC_SETTINGS<<EOF" >> $GITHUB_OUTPUT
-          echo "$DIAGNOSTIC_SETTINGS"     >> $GITHUB_OUTPUT
-          echo "EOF"                      >> $GITHUB_OUTPUT
+          {
+            echo "DIAGNOSTIC_SETTINGS<<__EOF__"
+            echo "$DIAGNOSTIC_SETTINGS"
+            echo "__EOF__"
+          } >> $GITHUB_OUTPUT
 
-          echo "ROLE_ASSIGNMENTS<<EOF"    >> $GITHUB_OUTPUT
-          echo "$ROLE_ASSIGNMENTS"        >> $GITHUB_OUTPUT
-          echo "EOF"                      >> $GITHUB_OUTPUT
+          {
+            echo "ROLE_ASSIGNMENTS<<__EOF__"
+            echo "$ROLE_ASSIGNMENTS"
+            echo "__EOF__"
+          } >> $GITHUB_OUTPUT
+
+          {
+            echo "LOCK<<__EOF__"
+            echo "$LOCK"
+            echo "__EOF__"
+          } >> $GITHUB_OUTPUT
 
       - name: Log Parameters
         run: |
@@ -202,9 +216,11 @@ jobs:
           echo "Location:             ${{ steps.vars.outputs.LOCATION }}"
           echo "Address Prefixes:     ${{ steps.vars.outputs.ADDRESS_PREFIXES }}"
           echo "DNS Servers:          ${{ steps.vars.outputs.DNS_SERVERS }}"
+          echo "Subnets:              ${{ steps.vars.outputs.SUBNETS }}"
           echo "VNet Encryption:      ${{ steps.vars.outputs.VNET_ENCRYPTION }}"
           echo "Flow Timeout (mins):  ${{ steps.vars.outputs.FLOW_TIMEOUT }}"
           echo "Enable VM Protection: ${{ steps.vars.outputs.ENABLE_VM_PROTECTION }}"
+          echo "Lock:                 ${{ steps.vars.outputs.LOCK }}"
 
       - name: Call wrapper (virtual-network)
         uses: ./.github/actions/vnet-template
@@ -218,6 +234,7 @@ jobs:
           peerings:                     ${{ steps.vars.outputs.PEERINGS }}
           diagnosticSettings:           ${{ steps.vars.outputs.DIAGNOSTIC_SETTINGS }}
           roleAssignments:              ${{ steps.vars.outputs.ROLE_ASSIGNMENTS }}
+          lock:                         ${{ steps.vars.outputs.LOCK }}
           ddosProtectionPlanResourceId: ${{ steps.vars.outputs.DDOS_PLAN_ID }}
           virtualNetworkBgpCommunity:   ${{ steps.vars.outputs.BGP_COMMUNITY }}
           vnetEncryption:               ${{ steps.vars.outputs.VNET_ENCRYPTION }}
@@ -227,9 +244,9 @@ jobs:
           enableTelemetry:              ${{ steps.vars.outputs.ENABLE_TELEMETRY }}
           tags: |
             {
-              "ENVIRONMENT":            "${{ steps.vars.outputs.ENVIRONMENT }}",
-              "TECH STACK CATEGORY":    "${{ env.TECH_STACK_CATEGORY }}",
-              "PROJECTS":               "${{ env.PROJECTS }}",
-              "OFFICE":                 "${{ env.OFFICE }}",
-              "Description":            "${{ env.DESCRIPTION }}"
+              "ENVIRONMENT":         "${{ steps.vars.outputs.ENVIRONMENT }}",
+              "TECH STACK CATEGORY": "${{ env.TECH_STACK_CATEGORY }}",
+              "PROJECTS":            "${{ env.PROJECTS }}",
+              "OFFICE":              "${{ env.OFFICE }}",
+              "Description":         "${{ env.DESCRIPTION }}"
             }
