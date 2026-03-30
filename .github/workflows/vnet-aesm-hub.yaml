@@ -207,7 +207,7 @@ jobs:
           echo "Enable VM Protection: ${{ steps.vars.outputs.ENABLE_VM_PROTECTION }}"
 
       - name: Call wrapper (virtual-network)
-        uses: ./.github/actions/virtual-network-template
+        uses: ./.github/actions/vnet-template
         with:
           resourceGroupName:            ${{ steps.vars.outputs.RESOURCE_GROUP_NAME }}
           vnetName:                     ${{ steps.vars.outputs.VNET_NAME }}
