@@ -29,131 +29,49 @@ variables:
   - name: vnetName
     value: vnet-aesm-hub-nonprod-seasia
 
+  # IMPORTANT: All JSON values MUST use single-quoted inline scalars.
+  # Do NOT use YAML block scalars (> or >- or |) for JSON values.
+  # The Python extractor in main.yaml relies on the pattern:
+  #   - name: <fieldName>
+  #     value: '<json>'
+
   - name: addressPrefixes
-    # JSON array — add more CIDRs if required
-    value: "10.10.0.0/16"
+    value: '["10.10.0.0/16"]'
 
   # ── DNS Servers ───────────────────────────────────────────────────────────
-  # Leave as '[]' to inherit Azure-provided DNS
+  # Use '[]' to inherit Azure-provided DNS
   - name: dnsServers
-    value: '["10.10.0.4", "10.10.0.5"]'
+    value: '["10.10.0.4","10.10.0.5"]'
 
   # ── Subnets ───────────────────────────────────────────────────────────────
-  # Full subnetType object array. All optional fields may be omitted.
-  # Fields per subnet:
-  #   name                              (required)
-  #   addressPrefix                     (required if addressPrefixes not set)
-  #   addressPrefixes                   (required if addressPrefix not set)
-  #   delegation                        e.g. "Microsoft.Web/serverFarms"
-  #   networkSecurityGroupResourceId    resource ID of existing NSG
-  #   routeTableResourceId              resource ID of existing Route Table
-  #   natGatewayResourceId              resource ID of existing NAT GW
-  #   privateEndpointNetworkPolicies    "Disabled"|"Enabled"|"NetworkSecurityGroupEnabled"|"RouteTableEnabled"
-  #   privateLinkServiceNetworkPolicies "Disabled"|"Enabled"
-  #   serviceEndpoints                  array of strings, e.g. ["Microsoft.Storage","Microsoft.Sql"]
-  #   defaultOutboundAccess             true|false
-  #   roleAssignments                   array of roleAssignmentType objects
+  # All on one line inside single quotes. Fields per subnet:
+  #   name (required), addressPrefix (required if addressPrefixes not set),
+  #   delegation, networkSecurityGroupResourceId, routeTableResourceId,
+  #   natGatewayResourceId, privateEndpointNetworkPolicies,
+  #   privateLinkServiceNetworkPolicies, serviceEndpoints[], defaultOutboundAccess
   - name: subnets
-    value: >-
-      [
-        {
-          "name": "snet-app",
-          "addressPrefix": "10.10.1.0/24",
-          "privateEndpointNetworkPolicies": "Disabled",
-          "privateLinkServiceNetworkPolicies": "Enabled",
-          "serviceEndpoints": ["Microsoft.Storage", "Microsoft.KeyVault"],
-          "defaultOutboundAccess": false
-        },
-        {
-          "name": "snet-data",
-          "addressPrefix": "10.10.2.0/24",
-          "privateEndpointNetworkPolicies": "Disabled",
-          "privateLinkServiceNetworkPolicies": "Disabled",
-          "serviceEndpoints": ["Microsoft.Sql", "Microsoft.Storage"]
-        },
-        {
-          "name": "snet-mgmt",
-          "addressPrefix": "10.10.3.0/24",
-          "privateEndpointNetworkPolicies": "Enabled"
-        },
-        {
-          "name": "AzureBastionSubnet",
-          "addressPrefix": "10.10.4.0/27"
-        },
-        {
-          "name": "GatewaySubnet",
-          "addressPrefix": "10.10.5.0/27"
-        }
-      ]
+    value: '[{"name":"snet-app","addressPrefix":"10.10.1.0/24","privateEndpointNetworkPolicies":"Disabled","privateLinkServiceNetworkPolicies":"Enabled","serviceEndpoints":["Microsoft.Storage","Microsoft.KeyVault"],"defaultOutboundAccess":false},{"name":"snet-data","addressPrefix":"10.10.2.0/24","privateEndpointNetworkPolicies":"Disabled","privateLinkServiceNetworkPolicies":"Disabled","serviceEndpoints":["Microsoft.Sql","Microsoft.Storage"]},{"name":"snet-mgmt","addressPrefix":"10.10.3.0/24","privateEndpointNetworkPolicies":"Enabled"},{"name":"AzureBastionSubnet","addressPrefix":"10.10.4.0/27"},{"name":"GatewaySubnet","addressPrefix":"10.10.5.0/27"}]'
 
   # ── Peerings ─────────────────────────────────────────────────────────────
-  # Set remotePeeringEnabled: true to deploy BOTH sides in one pass.
-  # Fields per peering:
-  #   remoteVirtualNetworkResourceId    (required)
-  #   name                              optional override
-  #   allowForwardedTraffic             default true
-  #   allowGatewayTransit               default false
-  #   allowVirtualNetworkAccess         default true
-  #   doNotVerifyRemoteGateways         default true
-  #   useRemoteGateways                 default false
-  #   remotePeeringEnabled              deploy reverse peering as well
-  #   remotePeeringName                 optional override for reverse peering
-  #   remotePeeringAllowForwardedTraffic
-  #   remotePeeringAllowGatewayTransit
-  #   remotePeeringAllowVirtualNetworkAccess
-  #   remotePeeringDoNotVerifyRemoteGateways
-  #   remotePeeringUseRemoteGateways
+  # remotePeeringEnabled:true deploys BOTH sides in one pass.
+  # NOTE: useRemoteGateways:true requires the remote VNet to have a gateway.
+  #       Set to false if no VPN/ER gateway exists on the remote side yet.
   - name: peerings
-    # Replace remoteVirtualNetworkResourceId with real hub VNet resource ID
-    value: >-
-      [
-        {
-          "name": "peer-shared-nonprod-to-hub",
-          "remoteVirtualNetworkResourceId": "/subscriptions/38f508c2-eca9-46a9-bfff-a6d3bc4f11d2/resourceGroups/rg-test-sree-ci-001/providers/Microsoft.Network/virtualNetworks/vnet-sree-test-ci-001",
-          "allowForwardedTraffic": true,
-          "allowGatewayTransit": false,
-          "allowVirtualNetworkAccess": true,
-          "useRemoteGateways": true,
-          "doNotVerifyRemoteGateways": true,
-          "remotePeeringEnabled": true,
-          "remotePeeringName": "peer-hub-to-shared-nonprod",
-          "remotePeeringAllowForwardedTraffic": true,
-          "remotePeeringAllowGatewayTransit": true,
-          "remotePeeringAllowVirtualNetworkAccess": true,
-          "remotePeeringUseRemoteGateways": false,
-          "remotePeeringDoNotVerifyRemoteGateways": true
-        }
-      ]
+    value: '[{"name":"peer-shared-nonprod-to-hub","remoteVirtualNetworkResourceId":"/subscriptions/38f508c2-eca9-46a9-bfff-a6d3bc4f11d2/resourceGroups/rg-test-sree-ci-001/providers/Microsoft.Network/virtualNetworks/vnet-sree-test-ci-001","allowForwardedTraffic":true,"allowGatewayTransit":false,"allowVirtualNetworkAccess":true,"useRemoteGateways":false,"doNotVerifyRemoteGateways":true,"remotePeeringEnabled":true,"remotePeeringName":"peer-hub-to-shared-nonprod","remotePeeringAllowForwardedTraffic":true,"remotePeeringAllowGatewayTransit":false,"remotePeeringAllowVirtualNetworkAccess":true,"remotePeeringUseRemoteGateways":false,"remotePeeringDoNotVerifyRemoteGateways":true}]'
 
   # ── Diagnostic Settings ───────────────────────────────────────────────────
-  # Replace workspaceResourceId with the real Log Analytics Workspace resource ID.
-  # logCategoriesAndGroups and metricCategories can be trimmed to specific
-  # categories or left as shown to capture everything.
+  # Replace workspaceResourceId with real Log Analytics Workspace resource ID.
   - name: diagnosticSettings
-    value: >-
-      [
-        {
-          "name": "diag-vnet-aesm-hub-nonprod-seasia",
-          "workspaceResourceId": "/subscriptions/38f508c2-eca9-46a9-bfff-a6d3bc4f11d2/resourcegroups/rg-test-sree-ci-001/providers/microsoft.operationalinsights/workspaces/log-sree-test-ci-001",
-          "logCategoriesAndGroups": [
-            { "categoryGroup": "allLogs", "enabled": true }
-          ],
-          "metricCategories": [
-            { "category": "AllMetrics", "enabled": true }
-          ]
-        }
-      ]
+    value: '[{"name":"diag-vnet-aesm-hub-nonprod-seasia","workspaceResourceId":"/subscriptions/38f508c2-eca9-46a9-bfff-a6d3bc4f11d2/resourcegroups/rg-test-sree-ci-001/providers/microsoft.operationalinsights/workspaces/log-sree-test-ci-001","logCategoriesAndGroups":[{"categoryGroup":"allLogs","enabled":true}],"metricCategories":[{"category":"AllMetrics","enabled":true}]}]'
 
   # ── Role Assignments ──────────────────────────────────────────────────────
-  # principalType: "ServicePrincipal"|"User"|"Group"
-  # roleDefinitionIdOrName: built-in name OR GUID OR full resource ID
   - name: roleAssignments
-    value: "[]"
+    value: '[]'
 
   # ── Lock ─────────────────────────────────────────────────────────────────
-  # kind: "CanNotDelete" | "ReadOnly" | "None"  (omit block or use {} to skip)
+  # kind: "CanNotDelete" | "ReadOnly" | "None" — use '{}' to skip locking
   - name: lock
-    value: '{ "kind": "CanNotDelete", "name": "lock-vnet-aesm-shared-nonprod" }'
+    value: '{"kind":"CanNotDelete","name":"lock-vnet-aesm-hub-nonprod-seasia"}'
 
   # ── Optional advanced settings ────────────────────────────────────────────
   - name: vnetEncryption
