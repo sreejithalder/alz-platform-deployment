@@ -71,7 +71,7 @@ variables:
   # ── Lock ─────────────────────────────────────────────────────────────────
   # kind: "CanNotDelete" | "ReadOnly" | "None" — use '{}' to skip locking
   - name: lock
-    value: '{"kind":"CanNotDelete","name":"lock-vnet-aesm-hub-nonprod-seasia"}'
+    value: '{}'
 
   # ── Optional advanced settings ────────────────────────────────────────────
   - name: vnetEncryption
