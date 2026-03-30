@@ -85,4 +85,4 @@ variables:
   - name: ddosProtectionPlanResourceId
     value: ''
   - name: virtualNetworkBgpCommunity
-    value: ""
+    value:
