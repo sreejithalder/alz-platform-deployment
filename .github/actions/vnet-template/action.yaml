@@ -1,0 +1,175 @@
+name: "Virtual Network Wrapper"
+description: "Validate and deploy Virtual Network via AVM Bicep"
+inputs:
+  resourceGroupName:
+    required: true
+  vnetName:
+    required: true
+  location:
+    required: true
+  addressPrefixes:
+    required: true
+    # JSON array string, e.g. '["10.0.0.0/16"]'
+  subnets:
+    required: false
+    default: "[]"
+    # JSON array of subnet objects — see variables YAML for full example
+  dnsServers:
+    required: false
+    default: "[]"
+    # JSON array of DNS server IPs, e.g. '["10.0.0.4","10.0.0.5"]'
+  ddosProtectionPlanResourceId:
+    required: false
+    default: ""
+  peerings:
+    required: false
+    default: "[]"
+    # JSON array of peering objects — see variables YAML for full example
+  vnetEncryption:
+    required: false
+    default: "false"
+  vnetEncryptionEnforcement:
+    required: false
+    default: "AllowUnencrypted"
+  flowTimeoutInMinutes:
+    required: false
+    default: "0"
+  enableVmProtection:
+    required: false
+    default: "false"
+  virtualNetworkBgpCommunity:
+    required: false
+    default: ""
+  diagnosticSettings:
+    required: false
+    default: "[]"
+    # JSON array of diagnostic setting objects
+  lock:
+    required: false
+    default: "{}"
+  roleAssignments:
+    required: false
+    default: "[]"
+  tags:
+    required: false
+    default: "{}"
+  enableTelemetry:
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate location
+      shell: bash
+      run: |
+        az account list-locations --query "[?name=='${{ inputs.location }}']" --output tsv \
+          || { echo "Invalid location: ${{ inputs.location }}"; exit 1; }
+
+    - name: Validate Resource Group exists
+      shell: bash
+      run: |
+        az group show --name "${{ inputs.resourceGroupName }}" \
+          || { echo "Resource Group not found: ${{ inputs.resourceGroupName }}"; exit 1; }
+
+    - name: Build params.json
+      shell: bash
+      run: |
+        # ── Boolean: enableTelemetry ──────────────────────────────────────────
+        ENABLETELEMETRY="${{ inputs.enableTelemetry }}"
+        if [ "$ENABLETELEMETRY" = "true" ] || [ "$ENABLETELEMETRY" = "True" ]; then
+          ENABLETELEMETRY=true
+        else
+          ENABLETELEMETRY=false
+        fi
+
+        # ── Boolean: vnetEncryption ───────────────────────────────────────────
+        VNETENCRYPTION="${{ inputs.vnetEncryption }}"
+        if [ "$VNETENCRYPTION" = "true" ] || [ "$VNETENCRYPTION" = "True" ]; then
+          VNETENCRYPTION=true
+        else
+          VNETENCRYPTION=false
+        fi
+
+        # ── Boolean: enableVmProtection ───────────────────────────────────────
+        ENABLEVMPROT="${{ inputs.enableVmProtection }}"
+        if [ "$ENABLEVMPROT" = "true" ] || [ "$ENABLEVMPROT" = "True" ]; then
+          ENABLEVMPROT=true
+        else
+          ENABLEVMPROT=false
+        fi
+
+        # ── Integer: flowTimeoutInMinutes ─────────────────────────────────────
+        FLOWTIMEOUT="${{ inputs.flowTimeoutInMinutes }}"
+        if ! [[ "$FLOWTIMEOUT" =~ ^[0-9]+$ ]]; then
+          FLOWTIMEOUT=0
+        fi
+
+        # ── Optional string fields (emit only when non-empty) ─────────────────
+        DDOS_BLOCK=""
+        if [ -n "${{ inputs.ddosProtectionPlanResourceId }}" ]; then
+          DDOS_BLOCK='"ddosProtectionPlanResourceId": { "value": "${{ inputs.ddosProtectionPlanResourceId }}" },'
+        fi
+
+        BGP_BLOCK=""
+        if [ -n "${{ inputs.virtualNetworkBgpCommunity }}" ]; then
+          BGP_BLOCK='"virtualNetworkBgpCommunity": { "value": "${{ inputs.virtualNetworkBgpCommunity }}" },'
+        fi
+
+        # ── Write params.json ─────────────────────────────────────────────────
+        cat > params.json << EOFPARAM
+        {
+          "name":                        { "value": "${{ inputs.vnetName }}" },
+          "location":                    { "value": "${{ inputs.location }}" },
+          "addressPrefixes":             { "value": ${{ inputs.addressPrefixes }} },
+          "subnets":                     { "value": ${{ inputs.subnets }} },
+          "dnsServers":                  { "value": ${{ inputs.dnsServers }} },
+          "peerings":                    { "value": ${{ inputs.peerings }} },
+          "diagnosticSettings":          { "value": ${{ inputs.diagnosticSettings }} },
+          "roleAssignments":             { "value": ${{ inputs.roleAssignments }} },
+          "lock":                        { "value": ${{ inputs.lock }} },
+          "tags":                        { "value": ${{ inputs.tags }} },
+          "vnetEncryption":              { "value": $VNETENCRYPTION },
+          "vnetEncryptionEnforcement":   { "value": "${{ inputs.vnetEncryptionEnforcement }}" },
+          "flowTimeoutInMinutes":        { "value": $FLOWTIMEOUT },
+          "enableVmProtection":          { "value": $ENABLEVMPROT },
+          "enableTelemetry":             { "value": $ENABLETELEMETRY }
+          $( [ -n "$DDOS_BLOCK" ] && echo ",$DDOS_BLOCK" )
+          $( [ -n "$BGP_BLOCK"  ] && echo ",$BGP_BLOCK"  )
+        }
+        EOFPARAM
+
+        tr -d '\r' < params.json > params_clean.json
+        mv params_clean.json params.json
+
+        python3 -c "import json; json.load(open('params.json'))" \
+          || { echo 'Invalid JSON in params.json'; cat params.json; exit 1; }
+
+        echo "Generated params.json:"
+        cat params.json
+
+    - name: Validate Bicep deployment
+      shell: bash
+      run: |
+        BICEP_FILE="bicep/res/network/virtual-network/main.bicep"
+        echo "Bicep file contents:"
+        cat "$BICEP_FILE" || echo "Bicep file not found"
+
+        az deployment group validate \
+          --resource-group "${{ inputs.resourceGroupName }}" \
+          --template-file "$BICEP_FILE" \
+          --parameters @params.json
+
+    - name: Deploy Virtual Network
+      shell: bash
+      run: |
+        BICEP_FILE="bicep/res/network/virtual-network/main.bicep"
+        az deployment group create \
+          --resource-group "${{ inputs.resourceGroupName }}" \
+          --template-file "$BICEP_FILE" \
+          --parameters @params.json
+
+    - name: Deployment Confirmation
+      shell: bash
+      run: |
+        echo "Successfully deployed Virtual Network: ${{ inputs.vnetName }} into RG: ${{ inputs.resourceGroupName }}"

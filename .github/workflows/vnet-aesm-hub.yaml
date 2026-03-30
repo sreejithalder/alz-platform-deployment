@@ -1,0 +1,235 @@
+name: Deploy Virtual Network
+
+on:
+  # Allow running from ANY branch using the button
+  workflow_dispatch:
+    inputs:
+      targetEnvironment:
+        description: "Select the Environment"
+        type: choice
+        default: vnet-aesm-hub-nonprod-seasia
+        options:
+          - vnet-aesm-hub-nonprod-seasia
+          - vnet-aesm-hub-nonprod-eastasia
+
+      pipeline_branch:
+        description: "Core-library branch"
+        type: string
+        default: branch_sree
+
+  # Allow automatic CI runs from BOTH main and branch_sree
+  push:
+    branches:
+      - main
+      - branch_sree
+
+  # Allow pipeline execution on Pull Request toward main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CORELIB_REPO: alz-platform-deployment
+  CORELIB_PATH: alz-azure-iac-template-library
+  BICEP_PATH: bicep
+  TECH_STACK_CATEGORY: "IaC"
+  PROJECTS: "Platform"
+  OFFICE: "Engineering"
+  DESCRIPTION: "Virtual Network Deployment"
+
+jobs:
+  deploy-virtual-network:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.pipeline_branch || github.ref }}
+
+      - name: Setup Azure CLI
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az --version
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.PLATFORM_NONPROD_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.PLATFORM_NONPROD_SUBSCRIPTION_ID }}
+
+      - name: Debug - List action directory
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Listing .github/actions:"
+          ls -la .github/actions/ || echo "actions directory not found"
+          echo "Listing virtual-network-template:"
+          ls -la .github/actions/virtual-network-template/ || echo "virtual-network-template directory not found"
+          echo "Checking for action file:"
+          cat .github/actions/virtual-network-template/action.yaml || echo "action.yaml not found"
+
+      - name: Load environment variables
+        id: vars
+        run: |
+          TARGET_ENV="${{ github.event.inputs.targetEnvironment || 'shared-nonprod-002' }}"
+          file="alz-azure-iac-core-pipeline/virtual-network/platform-nonprod/variables/${TARGET_ENV}.yaml"
+          echo "Using vars file: $file"
+
+          if [ ! -f "$file" ]; then
+            echo "ERROR: Variables file not found: $file"
+            exit 1
+          fi
+
+          # ── Scalar fields ──────────────────────────────────────────────────
+          ENVIRONMENT=$(grep '^  - name: ENVIRONMENT' -A1 "$file" | tail -n1 | awk '{print $2}')
+          AZURE_SUBSCRIPTION=$(grep '^  - name: AZURE_SUBSCRIPTION' -A1 "$file" | tail -n1 | awk '{print $2}')
+          LOCATION=$(grep '^  - name: location' -A1 "$file" | tail -n1 | awk '{print $2}')
+          RG_NAME=$(grep '^  - name: resourceGroupName' -A1 "$file" | tail -n1 | awk '{print $2}')
+          VNET_NAME=$(grep '^  - name: vnetName' -A1 "$file" | tail -n1 | awk '{print $2}')
+          ENABLE_TELEMETRY=$(grep '^  - name: enableTelemetry' -A1 "$file" | tail -n1 | awk '{print $2}')
+          SUBSCRIPTION_ID=$(grep '^  - name: subscriptionId' -A1 "$file" | tail -n1 | awk '{print $2}')
+          VNET_ENCRYPTION=$(grep '^  - name: vnetEncryption' -A1 "$file" | tail -n1 | awk '{print $2}')
+          VNET_ENCRYPTION_ENFORCEMENT=$(grep '^  - name: vnetEncryptionEnforcement' -A1 "$file" | tail -n1 | awk '{print $2}')
+          FLOW_TIMEOUT=$(grep '^  - name: flowTimeoutInMinutes' -A1 "$file" | tail -n1 | awk '{print $2}')
+          ENABLE_VM_PROTECTION=$(grep '^  - name: enableVmProtection' -A1 "$file" | tail -n1 | awk '{print $2}')
+          DDOS_PLAN_ID=$(grep '^  - name: ddosProtectionPlanResourceId' -A1 "$file" | tail -n1 | awk '{print $2}')
+          BGP_COMMUNITY=$(grep '^  - name: virtualNetworkBgpCommunity' -A1 "$file" | tail -n1 | awk '{print $2}')
+
+          # ── JSON / multi-line fields: use Python to safely extract ──────────
+          ADDRESS_PREFIXES=$(python3 - "$file" <<'PYEOF'
+          import sys, re, json
+          content = open(sys.argv[1]).read()
+          m = re.search(r"- name: addressPrefixes\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
+          print(m.group(1).strip() if m else '[]')
+          PYEOF
+          )
+
+          SUBNETS=$(python3 - "$file" <<'PYEOF'
+          import sys, re
+          content = open(sys.argv[1]).read()
+          m = re.search(r"- name: subnets\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL | re.MULTILINE)
+          print(m.group(1).strip() if m else '[]')
+          PYEOF
+          )
+
+          DNS_SERVERS=$(python3 - "$file" <<'PYEOF'
+          import sys, re
+          content = open(sys.argv[1]).read()
+          m = re.search(r"- name: dnsServers\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
+          print(m.group(1).strip() if m else '[]')
+          PYEOF
+          )
+
+          PEERINGS=$(python3 - "$file" <<'PYEOF'
+          import sys, re
+          content = open(sys.argv[1]).read()
+          m = re.search(r"- name: peerings\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
+          print(m.group(1).strip() if m else '[]')
+          PYEOF
+          )
+
+          DIAGNOSTIC_SETTINGS=$(python3 - "$file" <<'PYEOF'
+          import sys, re
+          content = open(sys.argv[1]).read()
+          m = re.search(r"- name: diagnosticSettings\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
+          print(m.group(1).strip() if m else '[]')
+          PYEOF
+          )
+
+          ROLE_ASSIGNMENTS=$(python3 - "$file" <<'PYEOF'
+          import sys, re
+          content = open(sys.argv[1]).read()
+          m = re.search(r"- name: roleAssignments\s*\n\s+value:\s*'(.+?)'", content, re.DOTALL)
+          print(m.group(1).strip() if m else '[]')
+          PYEOF
+          )
+
+          # ── Export all outputs ─────────────────────────────────────────────
+          echo "ENVIRONMENT=$ENVIRONMENT"                                >> $GITHUB_OUTPUT
+          echo "AZURE_SUBSCRIPTION=$AZURE_SUBSCRIPTION"                 >> $GITHUB_OUTPUT
+          echo "LOCATION=$LOCATION"                                      >> $GITHUB_OUTPUT
+          echo "RESOURCE_GROUP_NAME=$RG_NAME"                           >> $GITHUB_OUTPUT
+          echo "VNET_NAME=$VNET_NAME"                                    >> $GITHUB_OUTPUT
+          echo "ENABLE_TELEMETRY=$ENABLE_TELEMETRY"                     >> $GITHUB_OUTPUT
+          echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID"                       >> $GITHUB_OUTPUT
+          echo "VNET_ENCRYPTION=$VNET_ENCRYPTION"                       >> $GITHUB_OUTPUT
+          echo "VNET_ENCRYPTION_ENFORCEMENT=$VNET_ENCRYPTION_ENFORCEMENT" >> $GITHUB_OUTPUT
+          echo "FLOW_TIMEOUT=$FLOW_TIMEOUT"                             >> $GITHUB_OUTPUT
+          echo "ENABLE_VM_PROTECTION=$ENABLE_VM_PROTECTION"             >> $GITHUB_OUTPUT
+          echo "DDOS_PLAN_ID=$DDOS_PLAN_ID"                             >> $GITHUB_OUTPUT
+          echo "BGP_COMMUNITY=$BGP_COMMUNITY"                           >> $GITHUB_OUTPUT
+
+          # Multi-line JSON outputs require EOF delimiter syntax
+          echo "ADDRESS_PREFIXES<<EOF"    >> $GITHUB_OUTPUT
+          echo "$ADDRESS_PREFIXES"        >> $GITHUB_OUTPUT
+          echo "EOF"                      >> $GITHUB_OUTPUT
+
+          echo "SUBNETS<<EOF"             >> $GITHUB_OUTPUT
+          echo "$SUBNETS"                 >> $GITHUB_OUTPUT
+          echo "EOF"                      >> $GITHUB_OUTPUT
+
+          echo "DNS_SERVERS<<EOF"         >> $GITHUB_OUTPUT
+          echo "$DNS_SERVERS"             >> $GITHUB_OUTPUT
+          echo "EOF"                      >> $GITHUB_OUTPUT
+
+          echo "PEERINGS<<EOF"            >> $GITHUB_OUTPUT
+          echo "$PEERINGS"                >> $GITHUB_OUTPUT
+          echo "EOF"                      >> $GITHUB_OUTPUT
+
+          echo "DIAGNOSTIC_SETTINGS<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIAGNOSTIC_SETTINGS"     >> $GITHUB_OUTPUT
+          echo "EOF"                      >> $GITHUB_OUTPUT
+
+          echo "ROLE_ASSIGNMENTS<<EOF"    >> $GITHUB_OUTPUT
+          echo "$ROLE_ASSIGNMENTS"        >> $GITHUB_OUTPUT
+          echo "EOF"                      >> $GITHUB_OUTPUT
+
+      - name: Log Parameters
+        run: |
+          echo "ENVIRONMENT:          ${{ steps.vars.outputs.ENVIRONMENT }}"
+          echo "Azure Subscription:   ${{ steps.vars.outputs.AZURE_SUBSCRIPTION }}"
+          echo "Resource Group Name:  ${{ steps.vars.outputs.RESOURCE_GROUP_NAME }}"
+          echo "VNet Name:            ${{ steps.vars.outputs.VNET_NAME }}"
+          echo "Location:             ${{ steps.vars.outputs.LOCATION }}"
+          echo "Address Prefixes:     ${{ steps.vars.outputs.ADDRESS_PREFIXES }}"
+          echo "DNS Servers:          ${{ steps.vars.outputs.DNS_SERVERS }}"
+          echo "VNet Encryption:      ${{ steps.vars.outputs.VNET_ENCRYPTION }}"
+          echo "Flow Timeout (mins):  ${{ steps.vars.outputs.FLOW_TIMEOUT }}"
+          echo "Enable VM Protection: ${{ steps.vars.outputs.ENABLE_VM_PROTECTION }}"
+
+      - name: Call wrapper (virtual-network)
+        uses: ./.github/actions/virtual-network-template
+        with:
+          resourceGroupName:            ${{ steps.vars.outputs.RESOURCE_GROUP_NAME }}
+          vnetName:                     ${{ steps.vars.outputs.VNET_NAME }}
+          location:                     ${{ steps.vars.outputs.LOCATION }}
+          addressPrefixes:              ${{ steps.vars.outputs.ADDRESS_PREFIXES }}
+          subnets:                      ${{ steps.vars.outputs.SUBNETS }}
+          dnsServers:                   ${{ steps.vars.outputs.DNS_SERVERS }}
+          peerings:                     ${{ steps.vars.outputs.PEERINGS }}
+          diagnosticSettings:           ${{ steps.vars.outputs.DIAGNOSTIC_SETTINGS }}
+          roleAssignments:              ${{ steps.vars.outputs.ROLE_ASSIGNMENTS }}
+          ddosProtectionPlanResourceId: ${{ steps.vars.outputs.DDOS_PLAN_ID }}
+          virtualNetworkBgpCommunity:   ${{ steps.vars.outputs.BGP_COMMUNITY }}
+          vnetEncryption:               ${{ steps.vars.outputs.VNET_ENCRYPTION }}
+          vnetEncryptionEnforcement:    ${{ steps.vars.outputs.VNET_ENCRYPTION_ENFORCEMENT }}
+          flowTimeoutInMinutes:         ${{ steps.vars.outputs.FLOW_TIMEOUT }}
+          enableVmProtection:           ${{ steps.vars.outputs.ENABLE_VM_PROTECTION }}
+          enableTelemetry:              ${{ steps.vars.outputs.ENABLE_TELEMETRY }}
+          tags: |
+            {
+              "ENVIRONMENT":            "${{ steps.vars.outputs.ENVIRONMENT }}",
+              "TECH STACK CATEGORY":    "${{ env.TECH_STACK_CATEGORY }}",
+              "PROJECTS":               "${{ env.PROJECTS }}",
+              "OFFICE":                 "${{ env.OFFICE }}",
+              "Description":            "${{ env.DESCRIPTION }}"
+            }
