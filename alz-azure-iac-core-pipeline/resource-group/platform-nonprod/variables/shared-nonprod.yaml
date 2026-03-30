@@ -17,7 +17,7 @@ variables:
   - name: enableTelemetry
     value: true
   - name: subscriptionId
-    value: 81c05b3c-9602-4cf6-aa56-51c23b153db1
+    value: 38f508c2-eca9-46a9-bfff-a6d3bc4f11d2
 
   # Resource Group specific
   - name: resourceGroupName
