@@ -1,0 +1,128 @@
+name: Deploy Resource Group
+
+on:
+  # Allow running from ANY branch using the button
+  workflow_dispatch:
+    inputs:
+      targetEnvironment:
+        description: "Select the Environment"
+        type: choice
+        default: shared-nonprod-002
+        options:
+          - shared-nonprod-002
+          - connectivity-nonprod
+          - amba-nonprod
+          - identity-nonprod
+
+      pipeline_branch:
+        description: "Core-library branch"
+        type: string
+        default: branch_sree
+
+  # Allow automatic CI runs from BOTH main and branch_sree
+  push:
+    branches:
+      - main
+      - branch_sree
+
+  # Allow pipeline execution on Pull Request toward main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CORELIB_REPO: alz-platform-deployment
+  CORELIB_PATH: alz-azure-iac-template-library
+  BICEP_PATH: bicep
+  TECH_STACK_CATEGORY: "IaC"  # Define missing env vars
+  PROJECTS: "Platform"
+  OFFICE: "Engineering"
+  DESCRIPTION: "Resource Group Deployment"
+
+jobs:
+  deploy-resource-group:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.pipeline_branch || github.ref }}
+
+      - name: Setup Azure CLI
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az --version
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.PLATFORM_NONPROD_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.PLATFORM_NONPROD_SUBSCRIPTION_ID }}
+
+      - name: Debug - List action directory
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Listing .github/actions:"
+          ls -la .github/actions/ || echo "actions directory not found"
+          echo "Listing resource-group-template:"
+          ls -la .github/actions/resource-group-template/ || echo "resource-group-template directory not found"
+          echo "Checking for action file:"
+          cat .github/actions/resource-group-template/action.yaml || echo "action.yaml not found"
+
+      - name: Load environment variables
+        id: vars
+        run: |
+          TARGET_ENV="${{ github.event.inputs.targetEnvironment || 'shared-nonprod-002' }}"
+          file="alz-azure-iac-core-pipeline/resource-group/platform-nonprod/variables/${TARGET_ENV}.yaml"
+          echo "Using vars file: $file"
+
+          if [ ! -f "$file" ]; then
+            echo "ERROR: Variables file not found: $file"
+            exit 1
+          fi
+
+          ENVIRONMENT=$(grep '^  - name: ENVIRONMENT' -A1 "$file" | tail -n1 | awk '{print $2}')
+          AZURE_SUBSCRIPTION=$(grep '^  - name: AZURE_SUBSCRIPTION' -A1 "$file" | tail -n1 | awk '{print $2}')
+          LOCATION=$(grep '^  - name: location' -A1 "$file" | tail -n1 | awk '{print $2}')
+          RG_NAME=$(grep '^  - name: resourceGroupName' -A1 "$file" | tail -n1 | awk '{print $2}')
+          ENABLE_TELEMETRY=$(grep '^  - name: enableTelemetry' -A1 "$file" | tail -n1 | awk '{print $2}')
+          SUBSCRIPTION_ID=$(grep '^  - name: subscriptionId' -A1 "$file" | tail -n1 | awk '{print $2}')
+
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "AZURE_SUBSCRIPTION=$AZURE_SUBSCRIPTION" >> $GITHUB_OUTPUT
+          echo "LOCATION=$LOCATION" >> $GITHUB_OUTPUT
+          echo "RESOURCE_GROUP_NAME=$RG_NAME" >> $GITHUB_OUTPUT
+          echo "ENABLE_TELEMETRY=$ENABLE_TELEMETRY" >> $GITHUB_OUTPUT
+          echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID" >> $GITHUB_OUTPUT
+
+      - name: Log Parameters
+        run: |
+          echo "ENVIRONMENT: ${{ steps.vars.outputs.ENVIRONMENT }}"
+          echo "Azure Subscription: ${{ steps.vars.outputs.AZURE_SUBSCRIPTION }}"
+          echo "Resource Group Name: ${{ steps.vars.outputs.RESOURCE_GROUP_NAME }}"
+          echo "Location: ${{ steps.vars.outputs.LOCATION }}"
+
+      - name: Call wrapper (resource-group)
+        uses: ./.github/actions/resource-group-template
+        with:
+          resourceGroupName: ${{ steps.vars.outputs.RESOURCE_GROUP_NAME }}
+          location: ${{ steps.vars.outputs.LOCATION }}
+          enableTelemetry: ${{ steps.vars.outputs.ENABLE_TELEMETRY }}
+          tags: |
+            {
+              "ENVIRONMENT": "${{ steps.vars.outputs.ENVIRONMENT }}",
+              "TECH STACK CATEGORY": "${{ env.TECH_STACK_CATEGORY }}",
+              "PROJECTS": "${{ env.PROJECTS }}",
+              "OFFICE": "${{ env.OFFICE }}",
+              "Description": "${{ env.DESCRIPTION }}"
+            }
