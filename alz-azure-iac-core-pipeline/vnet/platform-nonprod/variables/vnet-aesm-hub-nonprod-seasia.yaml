@@ -31,7 +31,7 @@ variables:
 
   - name: addressPrefixes
     # JSON array — add more CIDRs if required
-    value: ["10.10.0.0/16"]
+    value: "10.10.0.0/16"
 
   # ── DNS Servers ───────────────────────────────────────────────────────────
   # Leave as '[]' to inherit Azure-provided DNS
